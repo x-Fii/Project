@@ -1,140 +1,166 @@
-// src/components/ServiceReportSignOff.tsx
 import React, { useRef, useState } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
 
-// Pulling the local API base path from our .env.local file configuration
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://192.168.100.200:8000/api/v1';
+const API_BASE = 'http://192.168.100.200:8000/api/v1';
 
 export const ServiceReportSignOff: React.FC = () => {
   const sigCanvasRef = useRef<SignatureCanvas>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Clear button helper to wipe the HTML canvas tracking clean
+  // Dynamic state hooks bound directly to real table parameters
+  const [formData, setFormData] = useState({
+    sr_no: 'SR-2026-0001',
+    do_no: 'DO/26/00179', // Matches the real parent data record row we seeded
+    company: 'Maxis Berhad',
+    store_type: 'MEP',
+    store_name: 'Taman Universiti MEP', // Matches real CSV outlet name tracking token
+    pic_name: 'Aiman Qushairy',
+    pic_tel: '+6012-3456789',
+    wo_number: 'WO-99124',
+    remedy_number: 'REM-148662',
+    diagnostic: 'Hardware replacement for digital brandwall signage player unit.',
+    action_taken: 'Replaced faulty PC unit with MMP25-00535 hardware asset swap.',
+    operator_email: 'fiqar@click-ix.com' // Domain constraint check matches @click-ix.com
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
   const clearCanvas = () => sigCanvasRef.current?.clear();
 
   const handleExecuteSignOff = async () => {
     if (sigCanvasRef.current?.isEmpty()) {
-      alert("Validation Block: Canvas signature pad is completely empty.");
+      alert("Validation Error: Please acquire client signature authorization sign-off on the pad.");
       return;
     }
 
     setIsSubmitting(true);
+    setSuccessMsg(null);
+
     try {
-      // 1. Convert Canvas to raw blob data object instead of base64 embedding in JSON string fields
-      const canvas = sigCanvasRef.current?.getTrimmedCanvas();
-      
+      const canvas = sigCanvasRef.current?.getCanvas();
+      if (!canvas) throw new Error("Canvas context initialization failure.");
+
       canvas.toBlob(async (blob) => {
         if (!blob) {
-          alert("Error: Failed to process raw canvas image streaming context.");
+          alert("Error transforming binary signature image data stream.");
+          setIsSubmitting(false);
           return;
         }
 
-        // Package the image payload structure into multipart/form-data form arrays
-        const uploadFormData = new FormData();
-        uploadFormData.append("file", blob, "client_signature.png");
+        try {
+          // Phase 1: Post the binary image payload to populate the central uploads ledger row
+          const uploadFormData = new FormData();
+          uploadFormData.append("file", blob, "signature_signoff.png");
 
-        // 2. Stream signature data chunk directly via the multipart upload endpoint contract
-        const uploadResponse = await axios.post(`${API_BASE}/uploads`, uploadFormData, {
-          headers: { "Content-Type": "multipart/form-data" }
-        });
+          const uploadRes = await axios.post(`${API_BASE}/uploads`, uploadFormData, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
 
-        const signatureUploadId = uploadResponse.data.upload_id;
+          const signatureUploadId = uploadRes.data.upload_id;
 
-        // 3. Formulate the structure matching your official API specifications
-        const reportPayload = {
-          sr_no: "SR-26-00188", // Formatted per business layout guidelines
-          do_no: "DO/26/00179",
-          client: {
-            company: "Maxis Berhad",
-            company_address: ["Level 18, Menara Maxis", "KLCC, 50088 Kuala Lumpur"],
-            store_type: "Flagship",
-            store_name: "KLCC Centre Court",
-            pic_name: "Aiman Rashid",
-            pic_tel: "+60123456789"
-          },
-          wo_number: "WO-77231",
-          remedy_number: "REM-148662",
-          diagnostic: "HDMI matrix configuration logic sync fault on display 02.",
-          action_taken: "Reallocated hardware, verified Maxis naming scheme output string.",
-          acknowledgement: {
-            signed_by: "Aiman Rashid",
-            signature_png_upload_id: signatureUploadId,
-            operator_email: "aiman.qushairy@click-ix.com" // Authenticating internal email boundary rule
+          // Phase 2: Transmit the master schema JSON matching API_CONTRACT_final.md spec rules
+          const reportPayload = {
+            sr_no: formData.sr_no,
+            do_no: formData.do_no,
+            client: {
+              company: formData.company,
+              company_address: ["Skudai, Johor Bahru Site Location"],
+              store_type: formData.store_type,
+              store_name: formData.store_name,
+              pic_name: formData.pic_name,
+              pic_tel: formData.pic_tel
+            },
+            wo_number: formData.wo_number,
+            remedy_number: formData.remedy_number,
+            diagnostic: formData.diagnostic,
+            action_taken: formData.action_taken,
+            acknowledgement: {
+              signed_by: formData.pic_name,
+              signature_png_upload_id: signatureUploadId,
+              operator_email: formData.operator_email
+            }
+          };
+
+          const finalRes = await axios.post(`${API_BASE}/operations/service-reports`, reportPayload);
+          
+          if (finalRes.status === 201) {
+            setSuccessMsg(`Ledger written successfully! ${finalRes.data.message}`);
           }
-        };
-
-        // 4. Send structured dataset to kickstart backend engine ReportLab compiling logic
-        const finalResponse = await axios.post(`${API_BASE}/operations/service-reports`, reportPayload);
-
-        if (finalResponse.status === 200 || finalResponse.status === 201) {
-          // Point download asset directly to streaming FileResponse path
-          const fullDownloadLink = `${API_BASE}/operations/service-reports/${encodeURIComponent(reportPayload.sr_no)}/download`;
-          setGeneratedPdfUrl(fullDownloadLink);
-          alert("Operational Success: Service Document written to MariaDB and compiled!");
+        } catch (innerErr: any) {
+          console.error(innerErr);
+          // Standard error envelope structure parser matching spec rules
+          const errMsg = innerErr.response?.data?.detail || "Network pipeline exception occurred.";
+          alert(`Transmission Refused: ${errMsg}`);
+        } finally {
+          setIsSubmitting(false);
         }
       }, "image/png");
 
-    } catch (err) {
-      console.error("System Error: File handling flow broken", err);
-      alert("System Action Interrupted: Inspect server network pipeline settings.");
-    } finally {
+    } catch (err: any) {
+      console.error(err);
       setIsSubmitting(false);
     }
   };
 
-  // Triggers native browser hardware driver prints without shifting viewport container frames
-  const triggerNativePrint = () => {
-    if (!generatedPdfUrl) return;
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'fixed';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = '0';
-    printFrame.src = generatedPdfUrl;
-    
-    document.body.appendChild(printFrame);
-    printFrame.contentWindow?.focus();
-    printFrame.contentWindow?.print();
-  };
-
   return (
-    <div style={{ background: '#ffffff', padding: '32px', borderRadius: '12px', fontFamily: 'sans-serif', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
-      <h3 style={{ color: '#1e293b', margin: '0 0 8px 0', fontSize: '20px' }}>Field Service Sign-off Desk (iPad Viewport)</h3>
-      <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 20px 0' }}>Captured operators must use corporate accounts ending with @click-ix.com.</p>
+    <div style={{ background: '#f8fafc', padding: '24px', fontFamily: 'monospace', color: '#1e293b' }}>
+      <h2>🛠️ Phase C Field Execution Desk (Dynamic Mode)</h2>
       
-      {/* Interactive Signature Writing Frame Container */}
-      <div style={{ border: '2px dashed #cbd5e1', borderRadius: '8px', background: '#f8fafc', padding: '10px', marginBottom: '20px', display: 'flex', justifyContent: 'center' }}>
-        <SignatureCanvas
-          ref={sigCanvasRef}
-          penColor="#0f172a"
-          canvasProps={{ width: 600, height: 200, style: { cursor: 'crosshair', maxWidth: '100%' } }}
-        />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+        <div>
+          <label>SR Number:</label>
+          <input type="text" name="sr_no" value={formData.sr_no} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
+        <div>
+          <label>Parent DO Reference:</label>
+          <input type="text" name="do_no" value={formData.do_no} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
+        <div>
+          <label>Client Company Name:</label>
+          <input type="text" name="company" value={formData.company} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
+        <div>
+          <label>Outlet / Site Location:</label>
+          <input type="text" name="store_name" value={formData.store_name} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
+        <div>
+          <label>Client PIC Name:</label>
+          <input type="text" name="pic_name" value={formData.pic_name} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
+        <div>
+          <label>Operator Email Contract:</label>
+          <input type="email" name="operator_email" value={formData.operator_email} onChange={handleInputChange} style={{ width: '100%', padding: '6px' }} />
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-        <button onClick={clearCanvas} style={{ padding: '10px 20px', background: '#64748b', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>
-          Wipe Pad Clean
-        </button>
-        <button onClick={handleExecuteSignOff} disabled={isSubmitting} style={{ padding: '10px 20px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>
-          {isSubmitting ? "Locking Manifesto..." : "Submit & Lock Service Report"}
+      <div style={{ marginBottom: '12px' }}>
+        <label>Fault Diagnostic Text:</label>
+        <textarea name="diagnostic" value={formData.diagnostic} onChange={handleInputChange} style={{ width: '100%', height: '60px' }} />
+      </div>
+
+      <div style={{ marginBottom: '16px' }}>
+        <label>Action Taken / Resolution Ledger:</label>
+        <textarea name="action_taken" value={formData.action_taken} onChange={handleInputChange} style={{ width: '100%', height: '60px' }} />
+      </div>
+
+      <div style={{ border: '2px solid #cbd5e1', background: '#fff', borderRadius: '4px', marginBottom: '12px' }}>
+        <SignatureCanvas ref={sigCanvasRef} penColor="#020617" canvasProps={{ width: 500, height: 150, className: 'sigCanvas' }} />
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={clearCanvas} style={{ padding: '8px 16px', cursor: 'pointer' }}>Clear Pad</button>
+        <button onClick={handleExecuteSignOff} disabled={isSubmitting} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', cursor: 'pointer' }}>
+          {isSubmitting ? "Locking Transaction Data..." : "Execute Authorization Submit"}
         </button>
       </div>
 
-      {/* Conditional Rendering Action Panel for Print & Download Tasks */}
-      {generatedPdfUrl && (
-        <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: '24px', animation: 'fadeIn 0.5s ease' }}>
-          <h4 style={{ color: '#0f172a', margin: '0 0 12px 0' }}>📄 Document Manifest Ready:</h4>
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button onClick={triggerNativePrint} style={{ padding: '12px 24px', background: '#059669', color: '#ffffff', border: 'none', borderRadius: '6px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🖨️ Direct Hardware Print
-            </button>
-            
-            <a href={generatedPdfUrl} download style={{ textDecoration: 'none', padding: '12px 24px', background: '#0f172a', color: '#ffffff', borderRadius: '6px', fontWeight: '700', textAlign: 'center', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              📥 Download PDF Copy
-            </a>
-          </div>
+      {successMsg && (
+        <div style={{ marginTop: '16px', background: '#bbf7d0', padding: '12px', borderLeft: '4px solid #16a34a' }}>
+          <strong>✅ {successMsg}</strong>
         </div>
       )}
     </div>

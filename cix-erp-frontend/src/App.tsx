@@ -1,5 +1,4 @@
-import React from 'react';
-import { ServiceReportSignOff } from './components/ServiceReportSignOff';
+import { ServiceReportSignOff } from './components/ServiceReportSignOff.tsx';
 
 function App() {
   return (
